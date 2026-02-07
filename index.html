@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Interrupt & PCB Simulator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="header-shell">
+    <header>
+      <h1 class="page-title">Interrupt Handling Simulation</h1>
+    </header>
+    <div class="tabs-row">
+      <button id="tabInterrupt" class="tab-btn active">Interrupt Handler</button>
+      <button id="tabMonitor" class="tab-btn">Data Monitoring</button>
+    </div>
+  </div>
+  <div style="height: 18px;"></div>
+  <div class="top-controls">
+    <button id="startScheduler">Start</button>
+    <span class="clock-label">System Clock: <span id="sysClock">0</span></span>
+  </div>
+  <main class="main-layout">
+    <div id="tabContentInterrupt">
+    <div class="queues-row">
+      <div class="queue-panel ready-panel">
+        <h2>Ready Queue</h2>
+        <div id="readyQueue" class="queue"></div>
+      </div>
+      <div class="queue-panel cpu-panel">
+        <h2>CPU</h2>
+        <div id="cpuBox" class="cpu-box">
+          <span id="cpuProcess"></span>
+        </div>
+        <div id="cpuLabel">Idle</div>
+        <div id="interruptArrow" class="interrupt-arrow" style="display:none;">&#8594; Interrupt!</div>
+      </div>
+      <div class="queue-panel waiting-panel">
+        <h2>Waiting Queue</h2>
+        <div id="waitingQueue" class="queue"></div>
+      </div>
+      <div class="queue-panel finished-panel">
+        <h2>Finished</h2>
+        <div id="finishedQueue" class="queue"></div>
+      </div>
+    </div>
+    <div class="controls-row">
+      <label>Process length:
+        <input id="procLength" type="number" min="1" max="12" value="6" style="width:50px;">
+      </label>
+      <label style="margin-left:16px;">Priority:
+        <input id="procPriority" type="number" min="1" max="5" value="3" style="width:50px;">
+      </label>
+      <label style="margin-left:16px;">Scheduling:
+        <select id="scheduleAlgo" style="width:140px;">
+          <option value="RR">Round Robin</option>
+          <option value="FCFS">FCFS</option>
+          <option value="SJF">SJF</option>
+          <option value="SRTF">SRTF</option>
+          <option value="PRIORITY">Priority</option>
+        </select>
+      </label>
+      <label id="timesliceLabel" style="margin-left:16px;">Timeslice:
+        <select id="quantumInput" style="width:70px;">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+          <option value="8">8</option>
+          <option value="9">9</option>
+          <option value="10">10</option>
+        </select>
+      </label>
+      <button id="createProc">Create Process</button>
+      <select id="interruptType">
+        <option value="I/O Interrupt">I/O Interrupt (p1)</option>
+        <option value="Device Interrupt">Device Interrupt (p2)</option>
+        <option value="Timer Interrupt">Timer Interrupt (p3)</option>
+        <option value="Mouse Interrupt">Mouse Interrupt (p1)</option>
+        <option value="Power Cut">Power Cut (p4)</option>
+      </select>
+      <button id="genInterrupt">Generate Interrupt</button>
+    </div>
+    <div class="info-row">
+      <div class="isr-panel">
+        <h3>ISR (Interrupt Service Routine)</h3>
+        <ol id="isrSteps"></ol>
+      </div>
+      <div class="pcb-panel">
+        <h3>PCB Table</h3>
+        <table id="pcbTable">
+          <thead><tr><th>PID</th><th>Length</th><th>PC</th><th class="prio-col">Priority</th><th>State</th><th>Location</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    </div> <!-- end tabContentInterrupt -->
+    <div id="tabContentMonitor" style="display:none;">
+      <div class="monitor-panel">
+        <h3>System Logs</h3>
+        <ul id="systemLogs" style="background:#181f2a;color:#e0e6f0;padding:16px 18px;min-height:120px;max-height:260px;overflow-y:auto;border-radius:8px;font-size:1.05em;"></ul>
+      </div>
+    </div>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
