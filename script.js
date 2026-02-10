@@ -28,6 +28,10 @@
   let quantum = 3; // default quantum in ticks
   let quantumUsed = 0;
   let quantumTimer = null;
+  let isPaused = false;
+  const pausableTimeouts = new Set();
+  const tickIntervalMs = 6000;
+  const isrDelayFactor = 1.35;
 
   // DOM
   const readyEl = document.getElementById('readyQueue');
@@ -57,6 +61,7 @@
   const scheduleAlgo = document.getElementById('scheduleAlgo');
   const procPriority = document.getElementById('procPriority');
   const startScheduler = document.getElementById('startScheduler');
+  const pauseToggle = document.getElementById('pauseToggle');
   const timesliceLabel = document.getElementById('timesliceLabel');
   const tabInterrupt = document.getElementById('tabInterrupt');
   const tabMonitor = document.getElementById('tabMonitor');
@@ -79,8 +84,59 @@
     utter.rate = 1;
     utter.pitch = 1;
     utter.lang = 'en-US';
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utter);
+    const synth = window.speechSynthesis;
+    if (synth.speaking || synth.pending) {
+      synth.cancel();
+    }
+    synth.resume();
+    synth.speak(utter);
+  }
+
+  function setPausableTimeout(fn, delay) {
+    const t = { id: null, remaining: delay, start: 0, fn };
+    const schedule = () => {
+      t.start = Date.now();
+      t.id = setTimeout(() => {
+        t.id = null;
+        pausableTimeouts.delete(t);
+        if (!isPaused) {
+          fn();
+        } else {
+          t.remaining = 0;
+          pausableTimeouts.add(t);
+        }
+      }, t.remaining);
+    };
+    schedule();
+    pausableTimeouts.add(t);
+    return t;
+  }
+
+  function pauseAllTimeouts() {
+    pausableTimeouts.forEach(t => {
+      if (!t.id) return;
+      clearTimeout(t.id);
+      t.remaining -= Date.now() - t.start;
+      if (t.remaining < 0) t.remaining = 0;
+      t.id = null;
+    });
+  }
+
+  function resumeAllTimeouts() {
+    pausableTimeouts.forEach(t => {
+      if (t.id) return;
+      t.start = Date.now();
+      t.id = setTimeout(() => {
+        t.id = null;
+        pausableTimeouts.delete(t);
+        if (!isPaused) {
+          t.fn();
+        } else {
+          t.remaining = 0;
+          pausableTimeouts.add(t);
+        }
+      }, t.remaining);
+    });
   }
 
   // Helpers
@@ -174,6 +230,7 @@
   function getSelectedAlgo() {
     return scheduleAlgo ? scheduleAlgo.value : 'RR';
   }
+
 
   function getRemaining(p) {
     return p.length - p.pc;
@@ -304,12 +361,19 @@
       cpuProcessEl.style.background = getProcColor(cpu.pid);
       cpuProcessEl.style.color = '#fff';
       cpuProcessEl.innerHTML = `PID ${cpu.pid} Running...`;
-      startSpinner(cpu.pid);
+      if (!isPaused) {
+        startSpinner(cpu.pid);
+      }
       cpuLabel.textContent = '';
     } else {
       cpuProcessEl.textContent = '';
       cpuProcessEl.className = '';
       cpuLabel.textContent = 'Idle';
+      stopSpinner();
+    }
+
+    if (isPaused) {
+      cpuLabel.textContent = 'Paused';
       stopSpinner();
     }
 
@@ -382,8 +446,22 @@
     }
   }
   function tick() {
+    if (isPaused) return;
+    if (!isrActive && !interruptPending) {
+      if (interruptDeferred) {
+        interruptDeferred = false;
+        processNextInterrupt();
+      } else if (!cpu && interruptQueue.length > 0) {
+        processNextInterrupt();
+      } else if (!cpu && !blockScheduling && readyQ.length > 0) {
+        schedule();
+      }
+    }
     clock++;
     const algo = getSelectedAlgo();
+    if (sysClock) {
+      sysClock.textContent = clock;
+    }
 
     // Execute instruction
     if (cpu && !isrActive && !interruptPending) {
@@ -426,12 +504,6 @@
       }
     }
 
-    // Handle deferred interrupt AFTER instruction boundary
-    if (interruptDeferred && !isrActive && !interruptPending) {
-      interruptDeferred = false;
-      processNextInterrupt();
-    }
-
     // If CPU is idle, try scheduling from Ready
     if (!cpu && !isrActive && !blockScheduling && readyQ.length > 0) {
       schedule();
@@ -442,7 +514,32 @@
     if (clockTimer) clearInterval(clockTimer);
     clockTimer = setInterval(() => {
       tick();
-    }, 5000);
+    }, tickIntervalMs);
+  }
+
+  function pauseSimulation() {
+    if (isPaused) return;
+    isPaused = true;
+    pauseAllTimeouts();
+    if (clockTimer) {
+      clearInterval(clockTimer);
+      clockTimer = null;
+    }
+    stopSpinner();
+    render();
+    logEvent('Simulation paused');
+  }
+
+  function resumeSimulation() {
+    if (!isPaused) return;
+    isPaused = false;
+    resumeAllTimeouts();
+    startClock();
+    if (cpu && !isrActive && !interruptPending) {
+      startSpinner(cpu.pid);
+    }
+    render();
+    logEvent('Simulation resumed');
   }
   function showMessage(msg) {
     let msgBox = document.getElementById('msgBox');
@@ -464,7 +561,7 @@
     }
     msgBox.textContent = msg;
     msgBox.style.display = 'block';
-    setTimeout(() => { msgBox.style.display = 'none'; }, 1800);
+    setPausableTimeout(() => { msgBox.style.display = 'none'; }, 1800);
   }
   function ensureFinishOverlay() {
     let overlay = document.getElementById('finishOverlay');
@@ -509,7 +606,7 @@
     speak(`Process ${pid} is finished`);
 
     // Auto close after 2 seconds
-    setTimeout(() => {
+    setPausableTimeout(() => {
       overlay.style.display = 'none';
     }, 2000);
   }
@@ -552,9 +649,11 @@
     const overlay = ensureInterruptOverlay();
     overlay.querySelector('#interruptBox').innerHTML = 'Interrupt handled<br>successfully';
     overlay.style.display = 'flex';
-    speak('Interrupt handled successfully');
+    requestAnimationFrame(() => {
+      speak('Interrupt handled successfully');
+    });
 
-    setTimeout(() => {
+    setPausableTimeout(() => {
       overlay.style.display = 'none';
     }, 1700);
   }
@@ -600,18 +699,18 @@
     interruptQueue = ordered;
     const queueFactor = interruptQueue.length;
     const multiFactor = queueFactor > 0 ? 1.4 : 1;
-    const arrowDelay = (1000 + queueFactor * 250) * multiFactor;
-    const powerCutDelay = (900 + queueFactor * 200) * multiFactor;
+    const arrowDelay = (1000 + queueFactor * 250) * multiFactor * isrDelayFactor;
+    const powerCutDelay = (900 + queueFactor * 200) * multiFactor * isrDelayFactor;
     lastInterruptType = next.type;
     interruptPending = true;
     blockScheduling = true;
     render();
     // Show arrow
     interruptArrow.style.display = 'block';
-    setTimeout(() => {
+    setPausableTimeout(() => {
       interruptArrow.style.display = 'none';
       if (lastInterruptType === 'Power Cut') {
-        setTimeout(() => {
+        setPausableTimeout(() => {
           // Preempt and move to end of Ready
           if (cpu) {
             cpu.state = 'Ready';
@@ -643,9 +742,9 @@
     render();
     const queueFactor = interruptQueue.length;
     const multiFactor = queueFactor > 0 ? 1.4 : 1;
-    const stepDelay = (1100 + queueFactor * 200) * multiFactor;
-    const ioDelay = (1400 + queueFactor * 200) * multiFactor;
-    const finishDelay = (600 + queueFactor * 120) * multiFactor;
+    const stepDelay = (1100 + queueFactor * 200) * multiFactor * isrDelayFactor;
+    const ioDelay = (1400 + queueFactor * 200) * multiFactor * isrDelayFactor;
+    const finishDelay = (600 + queueFactor * 120) * multiFactor * isrDelayFactor;
     const isIO = lastInterruptType === 'I/O Interrupt';
     const steps = isIO
       ? [
@@ -728,7 +827,7 @@
         isrSteps.appendChild(li);
         if (step.action) step.action();
         idx++;
-        setTimeout(nextStep, step.delay);
+        setPausableTimeout(nextStep, step.delay);
       } else {
         isrSteps.innerHTML = '';
         isrActive = false;
@@ -739,7 +838,7 @@
         if (shouldShowInterruptPopup()) {
           showInterruptPopup();
         }
-        setTimeout(() => {
+        setPausableTimeout(() => {
           processNextInterrupt();
           schedule();
         }, finishDelay);
@@ -771,7 +870,11 @@
     } else {
       pendingQ.push(p);
     }
-    logEvent(`Process created: PID ${p.pid}, length ${p.length}, priority ${p.priority}`);
+    if (getSelectedAlgo() === 'PRIORITY') {
+      logEvent(`Process created: PID ${p.pid}, length ${p.length}, priority ${p.priority}`);
+    } else {
+      logEvent(`Process created: PID ${p.pid}, length ${p.length}`);
+    }
     render();
     if (schedulerStarted) {
       if (!cpu && !isrActive && !interruptPending && !blockScheduling) {
@@ -820,7 +923,7 @@
             buildReadyFromPending();
             logEvent('All new processes moved to Ready');
             render();
-            setTimeout(() => {
+            setPausableTimeout(() => {
               schedule();
             }, 2200);
           };
@@ -840,6 +943,18 @@
   document.getElementById('genInterrupt').onclick = function() {
     triggerInterrupt();
   };
+
+  if (pauseToggle) {
+    pauseToggle.onclick = function() {
+      if (isPaused) {
+        pauseToggle.textContent = 'Pause';
+        resumeSimulation();
+      } else {
+        pauseToggle.textContent = 'Resume';
+        pauseSimulation();
+      }
+    };
+  }
 
   // Init
   render();
